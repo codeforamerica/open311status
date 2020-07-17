@@ -1,0 +1,125 @@
+name: Test
+on: [push]
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    env:
+      PGHOST: localhost
+      PGUSER: open311status
+      RAILS_ENV: test
+    services:
+      postgres:
+        image: postgres:10.8
+        env:
+          POSTGRES_USER: open311status
+          POSTGRES_DB: open311status_test
+          POSTGRES_PASSWORD: ""
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      # Ruby Dependencies
+      - name: Install missing libs (This is slated to be added to the base image soon!)
+        run: sudo apt-get -yqq install libpq-dev
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+      - name: Ruby gem cache
+        uses: actions/cache@v1
+        with:
+          path: vendor/bundle
+          key: v1-${{ runner.os }}-gems-${{ hashFiles('**/Gemfile.lock') }}
+          restore-keys: |
+            v1-${{ runner.os }}-gems-
+      - name: Install gems
+        run: |
+          gem install bundler -v $(grep -A 1 "BUNDLED WITH" Gemfile.lock | tail -1 | tr -d " ")
+          bundle config path vendor/bundle
+          bundle config --local build.sassc --disable-march-tune-native # https://github.com/sass/sassc-ruby/issues/146
+          bundle install --jobs 4 --retry 3 --frozen && bundle clean
+      # /Ruby Dependencies
+
+      # Javascript Dependencies
+      - name: Setup Node
+        uses: actions/setup-node@v1
+        with:
+          node-version: 10.13.0
+      - name: Find yarn cache location
+        id: yarn-cache
+        run: echo "::set-output name=dir::$(yarn cache dir)"
+      - name: JS package cache
+        uses: actions/cache@v1
+        with:
+          path: ${{ steps.yarn-cache.outputs.dir }}
+          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-yarn-
+      - name: Install packages
+        run: |
+          yarn install --pure-lockfile
+      # Javascript Dependencies
+
+      - name: Setup test database
+        run: bin/rails db:test:prepare
+      - name: Compile assets
+        run: bin/rails assets:precompile
+      - name: Run tests
+        run: RAILS_ENV=test DISABLE_SPRING=1 bin/rspec
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    env:
+      BUNDLE_JOBS: 4
+      BUNDLE_RETRY: 3
+      BUNDLE_PATH: vendor/bundle
+      DISABLE_SPRING: 1
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      # Ruby Dependencies
+      - name: Install missing libs (This is slated to be added to the base image soon!)
+        run: sudo apt-get -yqq install libpq-dev
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+      - name: Ruby gem cache
+        uses: actions/cache@v1
+        with:
+          path: vendor/bundle
+          key: v1-${{ runner.os }}-gems-${{ hashFiles('**/Gemfile.lock') }}
+          restore-keys: |
+            v1-${{ runner.os }}-gems-
+      - name: Install gems
+        run: |
+          gem install bundler -v $(grep -A 1 "BUNDLED WITH" Gemfile.lock | tail -1 | tr -d " ")
+          bundle config path vendor/bundle
+          bundle config --local build.sassc --disable-march-tune-native # https://github.com/sass/sassc-ruby/issues/146
+          bundle install --jobs 4 --retry 3 --frozen && bundle clean
+      # /Ruby Dependencies
+
+      # Javascript Dependencies
+      - name: Setup Node
+        uses: actions/setup-node@v1
+        with:
+          node-version: 10.13.0
+      - name: Find yarn cache location
+        id: yarn-cache
+        run: echo "::set-output name=dir::$(yarn cache dir)"
+      - name: JS package cache
+        uses: actions/cache@v1
+        with:
+          path: ${{ steps.yarn-cache.outputs.dir }}
+          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-yarn-
+      - name: Install packages
+        run: |
+          yarn install --pure-lockfile
+      # Javascript Dependencies
+
+      - name: Run linter
+        run: bin/lint
